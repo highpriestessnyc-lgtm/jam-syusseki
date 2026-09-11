@@ -200,7 +200,9 @@ async function getEligibleStudents(schoolId){
 /* ---------------- 出席画面の1クラス分を描画するカードHTMLを組み立て ---------------- */
 async function buildClassCard(cls, date, showSchoolName){
   const dow = new Date(date+'T00:00:00').getDay();
-  const eligible = (await getEligibleStudents(cls.school_id)).filter(s => s.active !== false && s.plan !== '休会');
+  // 「名簿から追加」は全校横断で検索できるようにする(オールで受けてる子が自校名簿に出ないのを防ぐ)
+  const { data: allStudents } = await sb.from('students').select('*').eq('active', true).neq('plan','休会');
+  const eligible = allStudents || [];
 
   const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', cls.id);
   const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
@@ -219,6 +221,11 @@ async function buildClassCard(cls, date, showSchoolName){
   const notDisplayed = eligible.filter(s => !displayed.includes(s));
 
   const schoolName = showSchoolName ? (schools.find(sc=>sc.id===cls.school_id)||{}).name || '' : '';
+
+  function studentSchoolTag(st){
+    const sc = schools.find(s2=>s2.id===st.school_id);
+    return sc ? sc.name : '';
+  }
 
   function studentRow(st){
     const monthCount = (monthAttendance||[]).filter(a=>a.student_id===st.id).length;
@@ -252,7 +259,7 @@ async function buildClassCard(cls, date, showSchoolName){
           <div class="walkin-item" data-name="${st.name}">
             <label style="display:flex;align-items:center;gap:8px;">
               <input type="checkbox" class="walkin-check" value="${st.id}">
-              ${st.name} <span class="muted">(${st.member_no}・${st.plan})</span>
+              ${st.name} <span class="muted">(${st.member_no}・${studentSchoolTag(st)}・${st.plan})</span>
             </label>
           </div>`).join('') : '<div class="muted small">名簿に該当者がいません</div>'}
         </div>
