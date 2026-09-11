@@ -246,9 +246,37 @@ async function buildClassCard(cls, date, showSchoolName){
   }
 
   const walkInId = 'walkin_' + cls.id;
+  const weekTableId = 'weektable_' + cls.id;
+
+  // 今月のこのクラスの出席から「第n週」テーブルを作る
+  const { data: classMonthAttendance } = await sb.from('attendance').select('student_id, attended_on')
+    .eq('class_id', cls.id).gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
+  const weekMap = {}; // studentId -> Set(weekNo)
+  let maxWeek = 4;
+  (classMonthAttendance||[]).forEach(a=>{
+    const d = parseInt(a.attended_on.split('-')[2], 10);
+    const weekNo = Math.ceil(d/7);
+    maxWeek = Math.max(maxWeek, weekNo);
+    if(!weekMap[a.student_id]) weekMap[a.student_id] = new Set();
+    weekMap[a.student_id].add(weekNo);
+  });
+  const weekStudentIds = new Set(Object.keys(weekMap));
+  const weekStudents = eligible.filter(s => weekStudentIds.has(s.id) || rosterIds.has(s.id));
+  let weekTableHtml = '<div class="empty">まだ今月の出席記録がありません</div>';
+  if(weekStudents.length){
+    let head = '<tr><th>生徒</th>' + Array.from({length:maxWeek},(_,i)=>`<th>${i+1}週目</th>`).join('') + '</tr>';
+    let body = weekStudents.map(s=>{
+      const weeks = weekMap[s.id] || new Set();
+      return '<tr><td>'+s.name+'</td>' + Array.from({length:maxWeek},(_,i)=> `<td style="text-align:center;">${weeks.has(i+1)?'✓':''}</td>`).join('') + '</tr>';
+    }).join('');
+    weekTableHtml = `<table>${head}${body}</table>`;
+  }
+
   let html = `<div class="card">
     <div class="class-header">${cls.name}${schoolName?` <span class="muted">／${schoolName}</span>`:''}</div>
     <div class="class-sub">${DOW[dow]}曜日${hasRoster ? '・登録メンバー '+rosterIds.size+'名' : '・登録メンバー未設定(出席済みのみ表示)'}</div>
+    <button class="link-btn" onclick="toggleWalkinPanel('${weekTableId}')">今月の出席表(週別)</button>
+    <div id="${weekTableId}" style="display:none;margin:8px 0;">${weekTableHtml}</div>
     ${displayed.length ? displayed.map(studentRow).join('') : '<div class="empty">まだ誰も出席登録されていません</div>'}
     <div class="walkin-panel">
       <button class="link-btn" onclick="toggleWalkinPanel('${walkInId}')">＋ 名簿から追加</button>
