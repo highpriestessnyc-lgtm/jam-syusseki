@@ -50,6 +50,8 @@
   .checkin-btn.done{background:var(--good);color:#052b16;}
   .checkin-btn.blocked{border-color:var(--line);color:var(--muted);}
   .checkin-btn.limit{border-color:var(--warn);color:var(--warn);}
+  .checkin-btn.absent-btn{border-color:var(--bad);color:var(--bad);}
+  .checkin-btn.absent-btn.done-absent{background:var(--bad);color:#2b0505;}
   .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;margin-left:6px;}
   .badge.オール, .badge.オールフリー{background:#3d2b6b;color:#c9b6ff;}
   .badge.フリー{background:#1f4a3d;color:#7ee6bd;}
@@ -210,12 +212,15 @@ async function buildClassCard(cls, date, showSchoolName){
 
   const monthStart = date.slice(0,7)+'-01';
   const eligibleIds = eligible.map(s=>s.id);
-  const { data: monthAttendance } = await sb.from('attendance').select('student_id,attended_on')
+  const { data: monthAttendance } = await sb.from('attendance').select('student_id,attended_on,status')
     .in('student_id', eligibleIds.length?eligibleIds:['00000000-0000-0000-0000-000000000000'])
+    .eq('status','present')
     .gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
-  const { data: todayAttendance } = await sb.from('attendance').select('student_id,class_id')
+  const { data: todayAttendance } = await sb.from('attendance').select('student_id,class_id,status')
     .eq('attended_on', date).eq('class_id', cls.id);
-  const checkedIds = new Set((todayAttendance||[]).map(a=>a.student_id));
+  const statusMap = {}; // studentId -> 'present'|'absent'
+  (todayAttendance||[]).forEach(a=>{ statusMap[a.student_id] = a.status; });
+  const checkedIds = new Set(Object.keys(statusMap));
 
   const displayed = eligible.filter(s => hasRoster ? (rosterIds.has(s.id) || checkedIds.has(s.id)) : checkedIds.has(s.id));
   const notDisplayed = eligible.filter(s => !displayed.includes(s));
@@ -229,19 +234,24 @@ async function buildClassCard(cls, date, showSchoolName){
 
   function studentRow(st){
     const monthCount = (monthAttendance||[]).filter(a=>a.student_id===st.id).length;
-    const checkedToday = checkedIds.has(st.id);
+    const status = statusMap[st.id]; // undefined | 'present' | 'absent'
     const limit = PLAN_LIMIT[st.plan];
-    const overLimit = limit && monthCount >= limit && !checkedToday;
-    let btnClass = 'checkin-btn';
-    if(checkedToday) btnClass += ' done';
-    else if(overLimit) btnClass += ' limit';
+    const overLimit = limit && monthCount >= limit && status !== 'present';
+    let presentClass = 'checkin-btn';
+    let absentClass = 'checkin-btn absent-btn';
+    if(status === 'present') presentClass += ' done';
+    else if(overLimit) presentClass += ' limit';
+    if(status === 'absent') absentClass += ' done-absent';
     return `
       <div class="student-row">
         <div>
           <div class="sname">${st.name}<span class="badge ${st.plan}">${st.plan}</span></div>
           <div class="smeta">${st.member_no} ・ 今月 ${monthCount}${limit ? '/'+limit : ''}回</div>
         </div>
-        <button class="${btnClass}" onclick="toggleAttendance('${st.id}','${cls.id}','${date}')">${checkedToday?'出席済':'出席'}</button>
+        <div class="flex-row">
+          <button class="${presentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','present')">出席</button>
+          <button class="${absentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','absent')">欠席</button>
+        </div>
       </div>`;
   }
 
@@ -249,16 +259,16 @@ async function buildClassCard(cls, date, showSchoolName){
   const weekTableId = 'weektable_' + cls.id;
 
   // 今月のこのクラスの出席から「第n週」テーブルを作る
-  const { data: classMonthAttendance } = await sb.from('attendance').select('student_id, attended_on')
+  const { data: classMonthAttendance } = await sb.from('attendance').select('student_id, attended_on, status')
     .eq('class_id', cls.id).gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
-  const weekMap = {}; // studentId -> Set(weekNo)
+  const weekMap = {}; // studentId -> Map(weekNo -> status)
   let maxWeek = 4;
   (classMonthAttendance||[]).forEach(a=>{
     const d = parseInt(a.attended_on.split('-')[2], 10);
     const weekNo = Math.ceil(d/7);
     maxWeek = Math.max(maxWeek, weekNo);
-    if(!weekMap[a.student_id]) weekMap[a.student_id] = new Set();
-    weekMap[a.student_id].add(weekNo);
+    if(!weekMap[a.student_id]) weekMap[a.student_id] = {};
+    weekMap[a.student_id][weekNo] = a.status;
   });
   const weekStudentIds = new Set(Object.keys(weekMap));
   const weekStudents = eligible.filter(s => weekStudentIds.has(s.id) || rosterIds.has(s.id));
@@ -266,10 +276,14 @@ async function buildClassCard(cls, date, showSchoolName){
   if(weekStudents.length){
     let head = '<tr><th>生徒</th>' + Array.from({length:maxWeek},(_,i)=>`<th>${i+1}週目</th>`).join('') + '</tr>';
     let body = weekStudents.map(s=>{
-      const weeks = weekMap[s.id] || new Set();
-      return '<tr><td>'+s.name+'</td>' + Array.from({length:maxWeek},(_,i)=> `<td style="text-align:center;">${weeks.has(i+1)?'✓':''}</td>`).join('') + '</tr>';
+      const weeks = weekMap[s.id] || {};
+      return '<tr><td>'+s.name+'</td>' + Array.from({length:maxWeek},(_,i)=>{
+        const st = weeks[i+1];
+        const mark = st === 'present' ? '✓' : st === 'absent' ? '✗' : '';
+        return `<td style="text-align:center;">${mark}</td>`;
+      }).join('') + '</tr>';
     }).join('');
-    weekTableHtml = `<table>${head}${body}</table>`;
+    weekTableHtml = `<table>${head}${body}</table><div class="muted small" style="margin-top:6px;">✓出席 ／ ✗欠席</div>`;
   }
 
   let html = `<div class="card">
@@ -315,7 +329,7 @@ async function addSelectedWalkins(panelId, classId, date){
     const { data: existing } = await sb.from('attendance').select('id')
       .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date).maybeSingle();
     if(!existing){
-      await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date });
+      await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date, status: 'present' });
     }
   }
   render();
@@ -328,18 +342,22 @@ function toggleWalkinPanel(id){
 }
 window.toggleWalkinPanel = toggleWalkinPanel;
 
-async function toggleAttendance(studentId, classId, date){
-  const { data: existing } = await sb.from('attendance').select('id')
+async function setAttendanceStatus(studentId, classId, date, status){
+  const { data: existing } = await sb.from('attendance').select('id,status')
     .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date).maybeSingle();
-  if(existing){
+  if(existing && existing.status === status){
+    // 同じボタンをもう一度押したら記録を消す(未定に戻す)
     await sb.from('attendance').delete().eq('id', existing.id);
+  } else if(existing){
+    const { error } = await sb.from('attendance').update({ status }).eq('id', existing.id);
+    if(error){ alert('更新エラー: '+error.message); return; }
   } else {
-    const { error } = await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date });
+    const { error } = await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date, status });
     if(error){ alert('登録エラー: '+error.message); return; }
   }
   render();
 }
-window.toggleAttendance = toggleAttendance;
+window.setAttendanceStatus = setAttendanceStatus;
 
 /* ---------------- 出席(校舎モード) ---------------- */
 async function renderAttend(main){
