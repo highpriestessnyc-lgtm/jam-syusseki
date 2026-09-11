@@ -202,6 +202,10 @@ async function buildClassCard(cls, date, showSchoolName){
   const dow = new Date(date+'T00:00:00').getDay();
   const eligible = (await getEligibleStudents(cls.school_id)).filter(s => s.active !== false && s.plan !== '休会');
 
+  const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', cls.id);
+  const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
+  const hasRoster = rosterIds.size > 0;
+
   const monthStart = date.slice(0,7)+'-01';
   const eligibleIds = eligible.map(s=>s.id);
   const { data: monthAttendance } = await sb.from('attendance').select('student_id,attended_on')
@@ -211,9 +215,8 @@ async function buildClassCard(cls, date, showSchoolName){
     .eq('attended_on', date).eq('class_id', cls.id);
   const checkedIds = new Set((todayAttendance||[]).map(a=>a.student_id));
 
-  // 最初は誰も表示しない。今日「名簿から追加」で出席登録した人だけがここに残る
-  const displayed = eligible.filter(s => checkedIds.has(s.id));
-  const notDisplayed = eligible.filter(s => !checkedIds.has(s.id));
+  const displayed = eligible.filter(s => hasRoster ? (rosterIds.has(s.id) || checkedIds.has(s.id)) : checkedIds.has(s.id));
+  const notDisplayed = eligible.filter(s => !displayed.includes(s));
 
   const schoolName = showSchoolName ? (schools.find(sc=>sc.id===cls.school_id)||{}).name || '' : '';
 
@@ -238,7 +241,7 @@ async function buildClassCard(cls, date, showSchoolName){
   const walkInId = 'walkin_' + cls.id;
   let html = `<div class="card">
     <div class="class-header">${cls.name}${schoolName?` <span class="muted">／${schoolName}</span>`:''}</div>
-    <div class="class-sub">${DOW[dow]}曜日 ・ 本日 ${displayed.length}名 出席</div>
+    <div class="class-sub">${DOW[dow]}曜日${hasRoster ? '・登録メンバー '+rosterIds.size+'名' : '・登録メンバー未設定(出席済みのみ表示)'}</div>
     ${displayed.length ? displayed.map(studentRow).join('') : '<div class="empty">まだ誰も出席登録されていません</div>'}
     <div class="walkin-panel">
       <button class="link-btn" onclick="toggleWalkinPanel('${walkInId}')">＋ 名簿から追加</button>
@@ -474,6 +477,7 @@ async function loadClassList(){
         <div><span class="badge" style="background:var(--card2);color:var(--accent2);">${DOW[c.day_of_week]}</span> ${c.name}${c.instructor?` <span class="muted">(${c.instructor})</span>`:''}</div>
         <div class="flex-row">
           <button class="ghost small" onclick="toggleClassEdit('${c.id}')">編集</button>
+          <button class="ghost small" onclick="toggleClassRoster('${c.id}')">登録メンバー</button>
           <button class="danger" onclick="deleteClass('${c.id}')">削除</button>
         </div>
       </div>
@@ -483,6 +487,7 @@ async function loadClassList(){
         <input type="text" id="editInstructor_${c.id}" value="${(c.instructor||'').replace(/"/g,'&quot;')}" placeholder="担当">
         <button class="primary small" onclick="saveClassEdit('${c.id}')">保存</button>
       </div>
+      <div id="roster_${c.id}" style="display:none;margin-top:8px;">読み込み中...</div>
     </div>`).join('');
 }
 
@@ -502,6 +507,35 @@ async function saveClassEdit(id){
   loadClassList();
 }
 window.saveClassEdit = saveClassEdit;
+
+async function toggleClassRoster(classId){
+  const el = document.getElementById('roster_'+classId);
+  const willOpen = el.style.display === 'none';
+  el.style.display = willOpen ? '' : 'none';
+  if(!willOpen) return;
+  el.innerHTML = '読み込み中...';
+  const eligible = await getEligibleStudents(currentSchoolId);
+  const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', classId);
+  const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
+  el.innerHTML = `<div class="muted small" style="margin-bottom:6px;">このクラスの登録メンバーにチェック(誰もチェックしなければ出席画面は出席済みの人だけ表示)</div>` +
+    eligible.map(s=>`
+      <div class="walkin-item">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" ${rosterIds.has(s.id)?'checked':''} onchange="toggleRosterMember('${classId}','${s.id}',this.checked)">
+          ${s.name} <span class="muted">(${s.member_no}・${s.plan})</span>
+        </label>
+      </div>`).join('');
+}
+window.toggleClassRoster = toggleClassRoster;
+
+async function toggleRosterMember(classId, studentId, checked){
+  if(checked){
+    await sb.from('class_students').upsert({ class_id: classId, student_id: studentId }, { onConflict: 'class_id,student_id' });
+  } else {
+    await sb.from('class_students').delete().eq('class_id', classId).eq('student_id', studentId);
+  }
+}
+window.toggleRosterMember = toggleRosterMember;
 
 async function addClass(){
   const day_of_week = parseInt(document.getElementById('newDow').value);
