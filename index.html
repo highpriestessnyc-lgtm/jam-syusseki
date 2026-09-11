@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JAM 出席管理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+  window.supabase = createClient(
+    'https://slqftrvijjzxdwxvbzah.supabase.co',
+    'sb_publishable_m2UYYDsCBPsUfBJBLkHCUQ_kVi5e2vT'
+  );
+  window.dispatchEvent(new Event('supabase-ready'));
+</script>
+<style>
+  :root{
+    --bg:#0f1115; --card:#181b22; --card2:#20242e; --line:#2a2f3a;
+    --text:#eef0f4; --muted:#9aa3b2; --accent:#ff5a8a; --accent2:#5ac8ff;
+    --good:#3ddc84; --warn:#ffb84d; --bad:#ff5a5a;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+  header{position:sticky;top:0;background:var(--bg);z-index:10;padding:12px 14px 0;border-bottom:1px solid var(--line);}
+  h1{font-size:17px;margin:0 0 10px;font-weight:700;}
+  .mode-switch{display:flex;gap:6px;margin-bottom:10px;}
+  .mode-switch button{flex:1;padding:8px;border-radius:9px;border:1px solid var(--line);background:var(--card2);color:var(--muted);font-size:13px;font-weight:700;}
+  .mode-switch button.active{background:var(--accent2);color:#08202b;border-color:var(--accent2);}
+  .school-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;}
+  .school-tabs button{flex:none;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:14px;font-weight:600;}
+  .school-tabs button.active{background:var(--accent);border-color:var(--accent);color:#1a0510;}
+  .subtabs{display:flex;gap:4px;padding:8px 14px 0;}
+  .subtabs button{flex:1;padding:9px 4px;border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;border-bottom:2px solid transparent;}
+  .subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
+  main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .muted{color:var(--muted);font-size:13px;}
+  select,input[type=text],input[type=date],input[type=month],input[type=number],input[type=file]{
+    background:var(--card2);border:1px solid var(--line);color:var(--text);padding:9px 10px;border-radius:9px;font-size:14px;width:100%;
+  }
+  button.primary{background:var(--accent2);color:#08202b;border:none;padding:10px 16px;border-radius:10px;font-weight:700;font-size:14px;}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:9px;font-size:13px;}
+  button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad);padding:6px 10px;border-radius:8px;font-size:12px;}
+  .student-row{display:flex;align-items:center;justify-content:space-between;padding:10px 4px;border-bottom:1px solid var(--line);}
+  .student-row:last-child{border-bottom:none;}
+  .sname{font-size:15px;font-weight:600;}
+  .smeta{font-size:12px;color:var(--muted);margin-top:2px;}
+  .checkin-btn{padding:10px 18px;border-radius:10px;border:1px solid var(--good);background:transparent;color:var(--good);font-weight:700;font-size:14px;min-width:74px;}
+  .checkin-btn.done{background:var(--good);color:#052b16;}
+  .checkin-btn.blocked{border-color:var(--line);color:var(--muted);}
+  .checkin-btn.limit{border-color:var(--warn);color:var(--warn);}
+  .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;margin-left:6px;}
+  .badge.オール, .badge.オールフリー{background:#3d2b6b;color:#c9b6ff;}
+  .badge.フリー{background:#1f4a3d;color:#7ee6bd;}
+  .badge.月4{background:#3a3a1f;color:#e6d67e;}
+  .badge.月8{background:#1f2f4a;color:#8ec2ff;}
+  .badge.休会{background:#4a1f1f;color:#ff9a9a;}
+  .class-header{font-weight:700;font-size:15px;margin-bottom:2px;}
+  .class-sub{font-size:12px;color:var(--muted);margin-bottom:8px;}
+  .empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;}
+  th{color:var(--muted);font-weight:600;font-size:12px;}
+  .toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+  .toolbar > *{flex:1;min-width:110px;}
+  .flex-row{display:flex;gap:8px;align-items:center;}
+  .small{font-size:12px;padding:6px 8px;}
+  .link-btn{background:none;border:none;color:var(--accent2);font-size:13px;font-weight:700;padding:4px 0;}
+  .walkin-panel{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
+  .walkin-item{display:flex;justify-content:space-between;align-items:center;padding:6px 2px;}
+  .edit-form{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);}
+  .edit-form > *{flex:1;min-width:100px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>JAM 出席管理</h1>
+  <div class="mode-switch" id="modeSwitch">
+    <button data-mode="school" class="active">校舎ごと</button>
+    <button data-mode="instructor">先生ごと</button>
+  </div>
+  <div id="schoolNav">
+    <div class="school-tabs" id="schoolTabs"></div>
+    <div class="subtabs" id="subTabs">
+      <button data-tab="attend" class="active">出席</button>
+      <button data-tab="roster">名簿</button>
+      <button data-tab="classes">クラス管理</button>
+      <button data-tab="report">月次集計</button>
+    </div>
+  </div>
+  <div id="instructorNav" style="display:none;padding-bottom:10px;">
+    <select id="instructorSelect"></select>
+  </div>
+</header>
+<main id="main"></main>
+
+<script>
+const PLANS = ['月4','月8','フリー','オールフリー','休会'];
+const DOW = ['日','月','火','水','木','金','土'];
+const PLAN_LIMIT = { '月4': 4, '月8': 8 }; // 月次上限(回数)
+
+let schools = [];
+let currentSchoolId = null;
+let currentTab = 'attend';
+let mode = 'school'; // 'school' | 'instructor'
+let currentInstructor = null;
+let sb;
+
+window.addEventListener('supabase-ready', init);
+
+async function init(){
+  sb = window.supabase;
+  await loadSchools();
+  renderSchoolTabs();
+  bindSubTabs();
+  bindModeSwitch();
+  if(schools.length){ currentSchoolId = schools[0].id; }
+  render();
+}
+
+async function loadSchools(){
+  const { data, error } = await sb.from('schools').select('*').order('sort_order');
+  if(error){ alert('校舎読み込みエラー: '+error.message); return; }
+  schools = data || [];
+}
+
+function bindModeSwitch(){
+  document.querySelectorAll('#modeSwitch button').forEach(btn=>{
+    btn.onclick = async ()=>{
+      mode = btn.dataset.mode;
+      document.querySelectorAll('#modeSwitch button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('schoolNav').style.display = mode==='school' ? '' : 'none';
+      document.getElementById('instructorNav').style.display = mode==='instructor' ? '' : 'none';
+      if(mode==='instructor'){ await loadInstructorList(); }
+      render();
+    };
+  });
+}
+
+async function loadInstructorList(){
+  const { data } = await sb.from('classes').select('instructor').not('instructor','is',null);
+  const names = [...new Set((data||[]).map(d=>d.instructor).filter(Boolean))].sort();
+  const sel = document.getElementById('instructorSelect');
+  sel.innerHTML = names.map(n=>`<option value="${n}">${n}</option>`).join('');
+  sel.onchange = render;
+  currentInstructor = names[0] || null;
+}
+
+function renderSchoolTabs(){
+  const el = document.getElementById('schoolTabs');
+  el.innerHTML = schools.map(s =>
+    `<button data-id="${s.id}" class="${s.id===currentSchoolId?'active':''}">${s.name}</button>`
+  ).join('');
+  el.querySelectorAll('button').forEach(btn=>{
+    btn.onclick = ()=>{ currentSchoolId = btn.dataset.id; renderSchoolTabs(); render(); };
+  });
+}
+
+function bindSubTabs(){
+  document.querySelectorAll('#subTabs button').forEach(btn=>{
+    btn.onclick = ()=>{
+      currentTab = btn.dataset.tab;
+      document.querySelectorAll('#subTabs button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      render();
+    };
+  });
+}
+
+function render(){
+  const main = document.getElementById('main');
+  if(mode==='instructor'){ renderInstructorPage(main); return; }
+  if(!currentSchoolId){ main.innerHTML = '<div class="empty">校舎がありません</div>'; return; }
+  if(currentTab==='attend') renderAttend(main);
+  else if(currentTab==='roster') renderRoster(main);
+  else if(currentTab==='classes') renderClasses(main);
+  else if(currentTab==='report') renderReport(main);
+}
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+/* ---------------- 共通: 校舎の対象生徒(自校+他校オールフリー) ---------------- */
+async function getEligibleStudents(schoolId){
+  const school = schools.find(s => s.id === schoolId);
+  const isKirishima = school && school.name === '霧島校';
+  const { data: ownStudents } = await sb.from('students').select('*').eq('school_id', schoolId);
+  let allFreeStudents = [];
+  if(!isKirishima){
+    const res = await sb.from('students').select('*').eq('plan','オールフリー').neq('school_id', schoolId);
+    allFreeStudents = res.data || [];
+  }
+  return [...(ownStudents||[]), ...allFreeStudents];
+}
+
+/* ---------------- 出席画面の1クラス分を描画するカードHTMLを組み立て ---------------- */
+async function buildClassCard(cls, date, showSchoolName){
+  const dow = new Date(date+'T00:00:00').getDay();
+  const eligible = (await getEligibleStudents(cls.school_id)).filter(s => s.active !== false && s.plan !== '休会');
+
+  const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', cls.id);
+  const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
+  const hasRoster = rosterIds.size > 0;
+
+  const monthStart = date.slice(0,7)+'-01';
+  const eligibleIds = eligible.map(s=>s.id);
+  const { data: monthAttendance } = await sb.from('attendance').select('student_id,attended_on')
+    .in('student_id', eligibleIds.length?eligibleIds:['00000000-0000-0000-0000-000000000000'])
+    .gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
+  const { data: todayAttendance } = await sb.from('attendance').select('student_id,class_id')
+    .eq('attended_on', date).eq('class_id', cls.id);
+  const checkedIds = new Set((todayAttendance||[]).map(a=>a.student_id));
+
+  const displayed = eligible.filter(s => !hasRoster || rosterIds.has(s.id) || checkedIds.has(s.id));
+  const notDisplayed = eligible.filter(s => !displayed.includes(s));
+
+  const schoolName = showSchoolName ? (schools.find(sc=>sc.id===cls.school_id)||{}).name || '' : '';
+
+  function studentRow(st){
+    const monthCount = (monthAttendance||[]).filter(a=>a.student_id===st.id).length;
+    const checkedToday = checkedIds.has(st.id);
+    const limit = PLAN_LIMIT[st.plan];
+    const overLimit = limit && monthCount >= limit && !checkedToday;
+    let btnClass = 'checkin-btn';
+    if(checkedToday) btnClass += ' done';
+    else if(overLimit) btnClass += ' limit';
+    return `
+      <div class="student-row">
+        <div>
+          <div class="sname">${st.name}<span class="badge ${st.plan}">${st.plan}</span></div>
+          <div class="smeta">${st.member_no} ・ 今月 ${monthCount}${limit ? '/'+limit : ''}回</div>
+        </div>
+        <button class="${btnClass}" onclick="toggleAttendance('${st.id}','${cls.id}','${date}')">${checkedToday?'出席済':'出席'}</button>
+      </div>`;
+  }
+
+  const walkInId = 'walkin_' + cls.id;
+  let html = `<div class="card">
+    <div class="class-header">${cls.name}${schoolName?` <span class="muted">／${schoolName}</span>`:''}</div>
+    <div class="class-sub">${DOW[dow]}曜日${hasRoster ? '・常連名簿 '+rosterIds.size+'名' : '・常連名簿未設定(全員表示中)'}</div>
+    ${displayed.length ? displayed.map(studentRow).join('') : '<div class="empty">対象生徒がいません</div>'}
+    <div class="walkin-panel">
+      <button class="link-btn" onclick="toggleWalkinPanel('${walkInId}')">＋ 名簿から追加(飛び入り)</button>
+      <div id="${walkInId}" style="display:none;margin-top:8px;">
+        ${notDisplayed.length ? notDisplayed.map(st=>`
+          <div class="walkin-item">
+            <div>${st.name} <span class="muted">(${st.member_no}・${st.plan})</span></div>
+            <button class="ghost small" onclick="toggleAttendance('${st.id}','${cls.id}','${date}');toggleWalkinPanel('${walkInId}')">出席にする</button>
+          </div>`).join('') : '<div class="muted small">名簿に該当者がいません</div>'}
+      </div>
+    </div>
+  </div>`;
+  return html;
+}
+
+function toggleWalkinPanel(id){
+  const el = document.getElementById(id);
+  el.style.display = el.style.display==='none' ? '' : 'none';
+}
+window.toggleWalkinPanel = toggleWalkinPanel;
+
+async function toggleAttendance(studentId, classId, date){
+  const { data: existing } = await sb.from('attendance').select('id')
+    .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date).maybeSingle();
+  if(existing){
+    await sb.from('attendance').delete().eq('id', existing.id);
+  } else {
+    const { error } = await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date });
+    if(error){ alert('登録エラー: '+error.message); return; }
+  }
+  render();
+}
+window.toggleAttendance = toggleAttendance;
+
+/* ---------------- 出席(校舎モード) ---------------- */
+async function renderAttend(main){
+  main.innerHTML = `
+    <div class="toolbar">
+      <input type="date" id="attendDate" value="${todayStr()}">
+    </div>
+    <div id="attendBody" class="empty">読み込み中...</div>
+  `;
+  document.getElementById('attendDate').onchange = ()=>loadAttendBody();
+  await loadAttendBody();
+}
+
+async function loadAttendBody(){
+  const date = document.getElementById('attendDate').value;
+  const dow = new Date(date+'T00:00:00').getDay();
+  const body = document.getElementById('attendBody');
+  body.innerHTML = '読み込み中...';
+
+  const { data: classes } = await sb.from('classes').select('*')
+    .eq('school_id', currentSchoolId).eq('day_of_week', dow).order('sort_order');
+
+  if(!classes || !classes.length){
+    body.innerHTML = `<div class="empty">${DOW[dow]}曜日のクラスはありません(クラス管理タブで追加できます)</div>`;
+    return;
+  }
+  const cards = await Promise.all(classes.map(c => buildClassCard(c, date, false)));
+  body.innerHTML = cards.join('');
+}
+
+/* ---------------- 先生ごとページ ---------------- */
+async function renderInstructorPage(main){
+  const sel = document.getElementById('instructorSelect');
+  currentInstructor = sel ? sel.value : currentInstructor;
+  main.innerHTML = `
+    <div class="toolbar">
+      <input type="date" id="instrDate" value="${todayStr()}">
+    </div>
+    <div id="instrBody" class="empty">読み込み中...</div>
+  `;
+  document.getElementById('instrDate').onchange = loadInstructorBody;
+  await loadInstructorBody();
+}
+
+async function loadInstructorBody(){
+  const date = document.getElementById('instrDate').value;
+  const dow = new Date(date+'T00:00:00').getDay();
+  const body = document.getElementById('instrBody');
+  body.innerHTML = '読み込み中...';
+  if(!currentInstructor){ body.innerHTML = '<div class="empty">インストラクターがまだ登録されていません</div>'; return; }
+
+  const { data: classes } = await sb.from('classes').select('*')
+    .eq('instructor', currentInstructor).eq('day_of_week', dow).order('sort_order');
+
+  if(!classes || !classes.length){
+    body.innerHTML = `<div class="empty">${currentInstructor}先生の${DOW[dow]}曜日のクラスはありません</div>`;
+    return;
+  }
+  const cards = await Promise.all(classes.map(c => buildClassCard(c, date, true)));
+  body.innerHTML = cards.join('');
+}
+
+/* ---------------- 名簿 ---------------- */
+async function renderRoster(main){
+  main.innerHTML = `
+    <div class="card">
+      <div class="row">
+        <div>
+          <div style="font-weight:700;">名簿インポート(CSV)</div>
+          <div class="muted small">列: school_name, member_no, name, plan</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;"><input type="file" id="csvFile" accept=".csv"></div>
+      <div style="margin-top:8px;"><button class="primary" onclick="importCSV()">インポート実行</button></div>
+      <div id="importResult" class="muted small" style="margin-top:6px;"></div>
+    </div>
+    <div class="card">
+      <div class="row"><div style="font-weight:700;">生徒追加</div></div>
+      <div class="toolbar" style="margin-top:8px;">
+        <input type="text" id="newMemberNo" placeholder="会員番号">
+        <input type="text" id="newName" placeholder="氏名">
+        <select id="newPlan">${PLANS.map(p=>`<option value="${p}">${p}</option>`).join('')}</select>
+        <button class="primary" onclick="addStudent()">追加</button>
+      </div>
+    </div>
+    <div class="card" id="rosterList">読み込み中...</div>
+  `;
+  await loadRosterList();
+}
+
+async function loadRosterList(){
+  const { data: students } = await sb.from('students').select('*')
+    .eq('school_id', currentSchoolId).order('member_no');
+  const el = document.getElementById('rosterList');
+  if(!students || !students.length){ el.innerHTML = '<div class="empty">生徒がいません</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>会員番号</th><th>氏名</th><th>プラン</th><th>状態</th><th></th></tr></thead><tbody>
+    ${students.map(s=>`
+      <tr>
+        <td><input type="text" value="${s.member_no}" style="width:80px" onchange="updateStudentField('${s.id}','member_no',this.value)"></td>
+        <td><input type="text" value="${s.name}" style="width:120px" onchange="updateStudentField('${s.id}','name',this.value)"></td>
+        <td><select onchange="updatePlan('${s.id}', this.value)">${PLANS.map(p=>`<option value="${p}" ${p===s.plan?'selected':''}>${p}</option>`).join('')}</select></td>
+        <td>${s.active ? '在籍' : '<span class="muted">退会</span>'}</td>
+        <td><button class="danger" onclick="toggleActive('${s.id}', ${!s.active})">${s.active?'退会':'復帰'}</button></td>
+      </tr>`).join('')}
+  </tbody></table>`;
+}
+
+async function updateStudentField(id, field, value){
+  const payload = {}; payload[field] = value.trim();
+  const { error } = await sb.from('students').update(payload).eq('id', id);
+  if(error){ alert('更新エラー: '+error.message); }
+  loadRosterList();
+}
+window.updateStudentField = updateStudentField;
+
+async function updatePlan(id, plan){
+  await sb.from('students').update({ plan }).eq('id', id);
+  loadRosterList();
+}
+window.updatePlan = updatePlan;
+
+async function toggleActive(id, active){
+  await sb.from('students').update({ active }).eq('id', id);
+  loadRosterList();
+}
+window.toggleActive = toggleActive;
+
+async function addStudent(){
+  const member_no = document.getElementById('newMemberNo').value.trim();
+  const name = document.getElementById('newName').value.trim();
+  const plan = document.getElementById('newPlan').value;
+  if(!member_no || !name){ alert('会員番号と氏名を入力してください'); return; }
+  const { error } = await sb.from('students').insert({ member_no, name, plan, school_id: currentSchoolId, active: true });
+  if(error){ alert('登録エラー: '+error.message); return; }
+  document.getElementById('newMemberNo').value = '';
+  document.getElementById('newName').value = '';
+  loadRosterList();
+}
+window.addStudent = addStudent;
+
+async function importCSV(){
+  const file = document.getElementById('csvFile').files[0];
+  if(!file){ alert('CSVファイルを選択してください'); return; }
+  const resultEl = document.getElementById('importResult');
+  resultEl.textContent = '解析中...';
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: async (res)=>{
+      const schoolByName = {}; schools.forEach(s=>schoolByName[s.name]=s.id);
+      function resolveSchoolId(name){
+        if(schoolByName[name]) return schoolByName[name];
+        const hit = schools.find(s => s.name.startsWith(name) || name.startsWith(s.name.replace('校','')));
+        return hit ? hit.id : null;
+      }
+      let ok=0, skip=0;
+      for(const row of res.data){
+        const schoolId = resolveSchoolId((row.school_name||'').trim());
+        const member_no = (row.member_no||'').trim();
+        const name = (row.name||'').trim();
+        const plan = PLANS.includes((row.plan||'').trim()) ? row.plan.trim() : 'フリー';
+        if(!schoolId || !member_no || !name){ skip++; continue; }
+        const { error } = await sb.from('students')
+          .upsert({ school_id: schoolId, member_no, name, plan, active: true }, { onConflict: 'member_no,school_id' });
+        if(error){ skip++; continue; }
+        ok++;
+      }
+      resultEl.textContent = `完了: ${ok}件登録/更新、${skip}件スキップ`;
+      loadRosterList();
+    }
+  });
+}
+window.importCSV = importCSV;
+
+/* ---------------- クラス管理 ---------------- */
+async function renderClasses(main){
+  main.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:8px;">クラス追加</div>
+      <div class="toolbar">
+        <select id="newDow">${DOW.map((d,i)=>`<option value="${i}">${d}曜日</option>`).join('')}</select>
+        <input type="text" id="newClassName" placeholder="クラス名 (例: HOUSE中級)">
+        <input type="text" id="newInstructor" placeholder="担当(例: YU-HI)">
+        <button class="primary" onclick="addClass()">追加</button>
+      </div>
+    </div>
+    <div class="card" id="classList">読み込み中...</div>
+  `;
+  await loadClassList();
+}
+
+async function loadClassList(){
+  const { data: classes } = await sb.from('classes').select('*')
+    .eq('school_id', currentSchoolId).order('day_of_week').order('sort_order');
+  const el = document.getElementById('classList');
+  if(!classes || !classes.length){ el.innerHTML = '<div class="empty">クラスがありません</div>'; return; }
+  el.innerHTML = classes.map(c=>`
+    <div class="student-row" style="display:block;">
+      <div class="row">
+        <div><span class="badge" style="background:var(--card2);color:var(--accent2);">${DOW[c.day_of_week]}</span> ${c.name}${c.instructor?` <span class="muted">(${c.instructor})</span>`:''}</div>
+        <div class="flex-row">
+          <button class="ghost small" onclick="toggleClassEdit('${c.id}')">編集</button>
+          <button class="ghost small" onclick="toggleClassRoster('${c.id}')">常連名簿</button>
+          <button class="danger" onclick="deleteClass('${c.id}')">削除</button>
+        </div>
+      </div>
+      <div id="edit_${c.id}" style="display:none;" class="edit-form">
+        <select id="editDow_${c.id}">${DOW.map((d,i)=>`<option value="${i}" ${i===c.day_of_week?'selected':''}>${d}曜日</option>`).join('')}</select>
+        <input type="text" id="editName_${c.id}" value="${c.name.replace(/"/g,'&quot;')}">
+        <input type="text" id="editInstructor_${c.id}" value="${(c.instructor||'').replace(/"/g,'&quot;')}" placeholder="担当">
+        <button class="primary small" onclick="saveClassEdit('${c.id}')">保存</button>
+      </div>
+      <div id="roster_${c.id}" style="display:none;margin-top:8px;">読み込み中...</div>
+    </div>`).join('');
+}
+
+function toggleClassEdit(id){
+  const el = document.getElementById('edit_'+id);
+  el.style.display = el.style.display==='none' ? '' : 'none';
+}
+window.toggleClassEdit = toggleClassEdit;
+
+async function saveClassEdit(id){
+  const day_of_week = parseInt(document.getElementById('editDow_'+id).value);
+  const name = document.getElementById('editName_'+id).value.trim();
+  const instructor = document.getElementById('editInstructor_'+id).value.trim() || null;
+  if(!name){ alert('クラス名を入力してください'); return; }
+  const { error } = await sb.from('classes').update({ day_of_week, name, instructor }).eq('id', id);
+  if(error){ alert('更新エラー: '+error.message); return; }
+  loadClassList();
+}
+window.saveClassEdit = saveClassEdit;
+
+async function toggleClassRoster(classId){
+  const el = document.getElementById('roster_'+classId);
+  const willOpen = el.style.display === 'none';
+  el.style.display = willOpen ? '' : 'none';
+  if(!willOpen) return;
+  el.innerHTML = '読み込み中...';
+  const eligible = await getEligibleStudents(currentSchoolId);
+  const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', classId);
+  const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
+  el.innerHTML = `<div class="muted small" style="margin-bottom:6px;">このクラスの常連さんにチェック(未チェックなら出席画面で全員表示のまま)</div>` +
+    eligible.map(s=>`
+      <div class="walkin-item">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" ${rosterIds.has(s.id)?'checked':''} onchange="toggleRosterMember('${classId}','${s.id}',this.checked)">
+          ${s.name} <span class="muted">(${s.member_no}・${s.plan})</span>
+        </label>
+      </div>`).join('');
+}
+window.toggleClassRoster = toggleClassRoster;
+
+async function toggleRosterMember(classId, studentId, checked){
+  if(checked){
+    await sb.from('class_students').upsert({ class_id: classId, student_id: studentId }, { onConflict: 'class_id,student_id' });
+  } else {
+    await sb.from('class_students').delete().eq('class_id', classId).eq('student_id', studentId);
+  }
+}
+window.toggleRosterMember = toggleRosterMember;
+
+async function addClass(){
+  const day_of_week = parseInt(document.getElementById('newDow').value);
+  const name = document.getElementById('newClassName').value.trim();
+  const instructor = document.getElementById('newInstructor').value.trim() || null;
+  if(!name){ alert('クラス名を入力してください'); return; }
+  await sb.from('classes').insert({ school_id: currentSchoolId, day_of_week, name, instructor });
+  document.getElementById('newClassName').value = '';
+  document.getElementById('newInstructor').value = '';
+  loadClassList();
+}
+window.addClass = addClass;
+
+async function deleteClass(id){
+  if(!confirm('このクラスを削除しますか？(出席記録・常連名簿も見えなくなります)')) return;
+  await sb.from('classes').delete().eq('id', id);
+  loadClassList();
+}
+window.deleteClass = deleteClass;
+
+/* ---------------- 月次集計 ---------------- */
+async function renderReport(main){
+  const ym = todayStr().slice(0,7);
+  main.innerHTML = `
+    <div class="toolbar"><input type="month" id="reportMonth" value="${ym}"></div>
+    <div id="reportBody" class="card">読み込み中...</div>
+  `;
+  document.getElementById('reportMonth').onchange = loadReport;
+  await loadReport();
+}
+
+async function loadReport(){
+  const ym = document.getElementById('reportMonth').value;
+  const start = ym+'-01';
+  const end = ym+'-31';
+  const body = document.getElementById('reportBody');
+  body.innerHTML = '読み込み中...';
+
+  const students = await getEligibleStudents(currentSchoolId);
+  const studentIds = students.map(s=>s.id);
+
+  const { data: attendance } = await sb.from('attendance').select('student_id')
+    .in('student_id', studentIds.length?studentIds:['00000000-0000-0000-0000-000000000000'])
+    .gte('attended_on', start).lte('attended_on', end);
+
+  const counts = {};
+  (attendance||[]).forEach(a=>{ counts[a.student_id] = (counts[a.student_id]||0)+1; });
+
+  const planTotals = {};
+  students.forEach(s=>{ planTotals[s.plan] = (planTotals[s.plan]||0)+1; });
+
+  let html = `<div style="font-weight:700;margin-bottom:8px;">プラン別人数計</div>
+    <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+      ${PLANS.map(p=>`<span class="badge ${p}">${p}: ${planTotals[p]||0}名</span>`).join('')}
+    </div>
+    <table><thead><tr><th>会員番号</th><th>氏名</th><th>プラン</th><th>今月回数</th></tr></thead><tbody>
+    ${students.sort((a,b)=>(counts[b.id]||0)-(counts[a.id]||0)).map(s=>`
+      <tr><td>${s.member_no}</td><td>${s.name}</td><td><span class="badge ${s.plan}">${s.plan}</span></td><td>${counts[s.id]||0}</td></tr>
+    `).join('')}
+    </tbody></table>`;
+  body.innerHTML = html;
+}
+</script>
+</body>
+</html>
