@@ -246,16 +246,46 @@ async function buildClassCard(cls, date, showSchoolName){
     <div class="walkin-panel">
       <button class="link-btn" onclick="toggleWalkinPanel('${walkInId}')">＋ 名簿から追加</button>
       <div id="${walkInId}" style="display:none;margin-top:8px;">
+        <input type="text" placeholder="名前で検索" oninput="filterWalkin('${walkInId}',this.value)" style="margin-bottom:8px;">
+        <div id="${walkInId}_list">
         ${notDisplayed.length ? notDisplayed.map(st=>`
-          <div class="walkin-item">
-            <div>${st.name} <span class="muted">(${st.member_no}・${st.plan})</span></div>
-            <button class="ghost small" onclick="toggleAttendance('${st.id}','${cls.id}','${date}');toggleWalkinPanel('${walkInId}')">出席にする</button>
+          <div class="walkin-item" data-name="${st.name}">
+            <label style="display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" class="walkin-check" value="${st.id}">
+              ${st.name} <span class="muted">(${st.member_no}・${st.plan})</span>
+            </label>
           </div>`).join('') : '<div class="muted small">名簿に該当者がいません</div>'}
+        </div>
+        ${notDisplayed.length ? `<button class="primary small" style="margin-top:8px;" onclick="addSelectedWalkins('${walkInId}','${cls.id}','${date}')">選択した人を出席にする</button>` : ''}
       </div>
     </div>
   </div>`;
   return html;
 }
+
+function filterWalkin(panelId, query){
+  const list = document.getElementById(panelId + '_list');
+  const q = query.trim();
+  list.querySelectorAll('.walkin-item').forEach(item=>{
+    item.style.display = item.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+window.filterWalkin = filterWalkin;
+
+async function addSelectedWalkins(panelId, classId, date){
+  const panel = document.getElementById(panelId);
+  const checked = [...panel.querySelectorAll('.walkin-check:checked')].map(c=>c.value);
+  if(!checked.length){ alert('生徒を選択してください'); return; }
+  for(const studentId of checked){
+    const { data: existing } = await sb.from('attendance').select('id')
+      .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date).maybeSingle();
+    if(!existing){
+      await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date });
+    }
+  }
+  render();
+}
+window.addSelectedWalkins = addSelectedWalkins;
 
 function toggleWalkinPanel(id){
   const el = document.getElementById(id);
