@@ -59,6 +59,7 @@
   .badge.月8{background:#1f2f4a;color:#8ec2ff;}
   .badge.休会{background:#4a1f1f;color:#ff9a9a;}
   .class-header{font-weight:700;font-size:15px;margin-bottom:2px;}
+  .day-section-title{font-weight:700;font-size:13px;color:var(--accent2);margin:14px 4px 6px;}
   .class-sub{font-size:12px;color:var(--muted);margin-bottom:8px;}
   .empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -184,6 +185,21 @@ function render(){
 function todayStr(){
   const d = new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// 基準日を含む週(日曜始まり)の7日分の日付文字列を、曜日インデックス順で返す
+function getWeekDates(refDateStr){
+  const ref = new Date(refDateStr+'T00:00:00');
+  const dow = ref.getDay();
+  const sunday = new Date(ref);
+  sunday.setDate(ref.getDate() - dow);
+  const dates = [];
+  for(let i=0;i<7;i++){
+    const d = new Date(sunday);
+    d.setDate(sunday.getDate()+i);
+    dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+  }
+  return dates; // dates[0]=日曜 ... dates[6]=土曜
 }
 
 /* ---------------- 共通: 校舎の対象生徒(自校+他校オールフリー) ---------------- */
@@ -372,20 +388,30 @@ async function renderAttend(main){
 }
 
 async function loadAttendBody(){
-  const date = document.getElementById('attendDate').value;
-  const dow = new Date(date+'T00:00:00').getDay();
+  const refDate = document.getElementById('attendDate').value;
+  const weekDates = getWeekDates(refDate);
   const body = document.getElementById('attendBody');
   body.innerHTML = '読み込み中...';
 
   const { data: classes } = await sb.from('classes').select('*')
-    .eq('school_id', currentSchoolId).eq('day_of_week', dow).order('sort_order');
+    .eq('school_id', currentSchoolId).order('day_of_week').order('sort_order');
 
   if(!classes || !classes.length){
-    body.innerHTML = `<div class="empty">${DOW[dow]}曜日のクラスはありません(クラス管理タブで追加できます)</div>`;
+    body.innerHTML = `<div class="empty">クラスがありません(クラス管理タブで追加できます)</div>`;
     return;
   }
-  const cards = await Promise.all(classes.map(c => buildClassCard(c, date, false)));
-  body.innerHTML = cards.join('');
+
+  let html = '';
+  for(let dow=0; dow<7; dow++){
+    const dayClasses = classes.filter(c => c.day_of_week === dow);
+    if(!dayClasses.length) continue;
+    const dDate = weekDates[dow];
+    const isToday = dDate === todayStr();
+    html += `<div class="day-section-title">${DOW[dow]}曜日 <span class="muted">(${dDate.slice(5)}${isToday?'・本日':''})</span></div>`;
+    const cards = await Promise.all(dayClasses.map(c => buildClassCard(c, dDate, false)));
+    html += cards.join('');
+  }
+  body.innerHTML = html || '<div class="empty">この週はクラスがありません</div>';
 }
 
 /* ---------------- 先生ごとページ ---------------- */
@@ -403,21 +429,30 @@ async function renderInstructorPage(main){
 }
 
 async function loadInstructorBody(){
-  const date = document.getElementById('instrDate').value;
-  const dow = new Date(date+'T00:00:00').getDay();
+  const refDate = document.getElementById('instrDate').value;
+  const weekDates = getWeekDates(refDate);
   const body = document.getElementById('instrBody');
   body.innerHTML = '読み込み中...';
   if(!currentInstructor){ body.innerHTML = '<div class="empty">インストラクターがまだ登録されていません</div>'; return; }
 
   const { data: classes } = await sb.from('classes').select('*')
-    .eq('instructor', currentInstructor).eq('day_of_week', dow).order('sort_order');
+    .eq('instructor', currentInstructor).order('day_of_week').order('sort_order');
 
   if(!classes || !classes.length){
-    body.innerHTML = `<div class="empty">${currentInstructor}先生の${DOW[dow]}曜日のクラスはありません</div>`;
+    body.innerHTML = `<div class="empty">${currentInstructor}先生のクラスは登録されていません</div>`;
     return;
   }
-  const cards = await Promise.all(classes.map(c => buildClassCard(c, date, true)));
-  body.innerHTML = cards.join('');
+  let html = '';
+  for(let dow=0; dow<7; dow++){
+    const dayClasses = classes.filter(c => c.day_of_week === dow);
+    if(!dayClasses.length) continue;
+    const dDate = weekDates[dow];
+    const isToday = dDate === todayStr();
+    html += `<div class="day-section-title">${DOW[dow]}曜日 <span class="muted">(${dDate.slice(5)}${isToday?'・本日':''})</span></div>`;
+    const cards = await Promise.all(dayClasses.map(c => buildClassCard(c, dDate, true)));
+    html += cards.join('');
+  }
+  body.innerHTML = html;
 }
 
 /* ---------------- 名簿 ---------------- */
@@ -597,25 +632,32 @@ async function toggleClassRoster(classId){
   el.style.display = willOpen ? '' : 'none';
   if(!willOpen) return;
   el.innerHTML = '読み込み中...';
-  const eligible = await getEligibleStudents(currentSchoolId);
+  const { data: allStudents } = await sb.from('students').select('*').eq('active', true);
   const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', classId);
   const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
-  el.innerHTML = `<div class="muted small" style="margin-bottom:6px;">このクラスの登録メンバーにチェック(誰もチェックしなければ出席画面は出席済みの人だけ表示)</div>` +
-    eligible.map(s=>`
-      <div class="walkin-item">
+  el.innerHTML = `<input type="text" placeholder="名前で検索(全校対象)" oninput="filterWalkin('roster_${classId}',this.value)" style="margin-bottom:8px;">
+    <div class="muted small" style="margin-bottom:6px;">チェックすると即保存されます(保存ボタンは不要)</div>
+    <div id="roster_${classId}_list">` +
+    (allStudents||[]).map(s=>`
+      <div class="walkin-item" data-name="${s.name}">
         <label style="display:flex;align-items:center;gap:8px;">
-          <input type="checkbox" ${rosterIds.has(s.id)?'checked':''} onchange="toggleRosterMember('${classId}','${s.id}',this.checked)">
-          ${s.name} <span class="muted">(${s.member_no}・${s.plan})</span>
+          <input type="checkbox" ${rosterIds.has(s.id)?'checked':''} onchange="toggleRosterMember('${classId}','${s.id}',this.checked,this)">
+          ${s.name} <span class="muted">(${s.member_no}・${(schools.find(sc=>sc.id===s.school_id)||{}).name||''}・${s.plan})</span>
+          <span class="save-flag" style="display:none;color:var(--good);font-size:11px;">保存済</span>
         </label>
-      </div>`).join('');
+      </div>`).join('') + `</div>`;
 }
 window.toggleClassRoster = toggleClassRoster;
 
-async function toggleRosterMember(classId, studentId, checked){
+async function toggleRosterMember(classId, studentId, checked, checkboxEl){
   if(checked){
     await sb.from('class_students').upsert({ class_id: classId, student_id: studentId }, { onConflict: 'class_id,student_id' });
   } else {
     await sb.from('class_students').delete().eq('class_id', classId).eq('student_id', studentId);
+  }
+  if(checkboxEl){
+    const flag = checkboxEl.parentElement.querySelector('.save-flag');
+    if(flag){ flag.style.display = ''; setTimeout(()=>{ flag.style.display='none'; }, 1200); }
   }
 }
 window.toggleRosterMember = toggleRosterMember;
