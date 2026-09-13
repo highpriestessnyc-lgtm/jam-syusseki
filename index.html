@@ -103,6 +103,19 @@ const PLANS = ['月4','月8','フリー','オールフリー','休会'];
 const DOW = ['日','月','火','水','木','金','土'];
 const PLAN_LIMIT = { '月4': 4, '月8': 8 }; // 月次上限(回数)
 
+// 会員番号の自然順ソート: アルファベット部分→数字→残り の順。プレフィックス無し(本校)が最優先。
+function parseMemberNo(m){
+  const match = String(m||'').match(/^([A-Za-z]*)-?(\d+)(.*)$/);
+  if(!match) return { prefix: String(m||''), num: 0, suffix: '' };
+  return { prefix: match[1], num: parseInt(match[2],10), suffix: match[3] };
+}
+function compareMemberNo(a, b){
+  const pa = parseMemberNo(a.member_no), pb = parseMemberNo(b.member_no);
+  if(pa.prefix !== pb.prefix) return pa.prefix.localeCompare(pb.prefix);
+  if(pa.num !== pb.num) return pa.num - pb.num;
+  return pa.suffix.localeCompare(pb.suffix);
+}
+
 let schools = [];
 let currentSchoolId = null;
 let currentTab = 'attend';
@@ -220,7 +233,7 @@ async function buildClassCard(cls, date, showSchoolName){
   const dow = new Date(date+'T00:00:00').getDay();
   // 「名簿から追加」は全校横断で検索できるようにする(オールで受けてる子が自校名簿に出ないのを防ぐ)
   const { data: allStudents } = await sb.from('students').select('*').eq('active', true).neq('plan','休会');
-  const eligible = allStudents || [];
+  const eligible = (allStudents || []).slice().sort(compareMemberNo);
 
   const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', cls.id);
   const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
@@ -485,9 +498,10 @@ async function renderRoster(main){
 
 async function loadRosterList(){
   const { data: students } = await sb.from('students').select('*')
-    .eq('school_id', currentSchoolId).order('member_no');
+    .eq('school_id', currentSchoolId);
   const el = document.getElementById('rosterList');
   if(!students || !students.length){ el.innerHTML = '<div class="empty">生徒がいません</div>'; return; }
+  students.sort(compareMemberNo);
   el.innerHTML = `<table><thead><tr><th>会員番号</th><th>氏名</th><th>プラン</th><th>状態</th><th></th></tr></thead><tbody>
     ${students.map(s=>`
       <tr>
@@ -633,12 +647,13 @@ async function toggleClassRoster(classId){
   if(!willOpen) return;
   el.innerHTML = '読み込み中...';
   const { data: allStudents } = await sb.from('students').select('*').eq('active', true);
+  const sortedStudents = (allStudents||[]).slice().sort(compareMemberNo);
   const { data: rosterRows } = await sb.from('class_students').select('student_id').eq('class_id', classId);
   const rosterIds = new Set((rosterRows||[]).map(r=>r.student_id));
   el.innerHTML = `<input type="text" placeholder="名前で検索(全校対象)" oninput="filterWalkin('roster_${classId}',this.value)" style="margin-bottom:8px;">
     <div class="muted small" style="margin-bottom:6px;">チェックすると即保存されます(保存ボタンは不要)</div>
     <div id="roster_${classId}_list">` +
-    (allStudents||[]).map(s=>`
+    sortedStudents.map(s=>`
       <div class="walkin-item" data-name="${s.name}">
         <label style="display:flex;align-items:center;gap:8px;">
           <input type="checkbox" ${rosterIds.has(s.id)?'checked':''} onchange="toggleRosterMember('${classId}','${s.id}',this.checked,this)">
