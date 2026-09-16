@@ -245,11 +245,15 @@ async function buildClassCard(cls, date, showSchoolName){
     .in('student_id', eligibleIds.length?eligibleIds:['00000000-0000-0000-0000-000000000000'])
     .eq('status','present')
     .gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
-  const { data: todayAttendance } = await sb.from('attendance').select('student_id,class_id,status')
+  const { data: todayAttendance } = await sb.from('attendance').select('student_id,class_id,status,visitor_type')
     .eq('attended_on', date).eq('class_id', cls.id);
   const statusMap = {}; // studentId -> 'present'|'absent'
-  (todayAttendance||[]).forEach(a=>{ statusMap[a.student_id] = a.status; });
+  const visitorMap = {}; // studentId -> null|'member_visitor'|'non_member_visitor'
+  (todayAttendance||[]).filter(a=>a.student_id).forEach(a=>{ statusMap[a.student_id] = a.status; visitorMap[a.student_id] = a.visitor_type; });
   const checkedIds = new Set(Object.keys(statusMap));
+
+  const { data: todayGuests } = await sb.from('attendance').select('id,guest_name,status,visitor_type')
+    .eq('attended_on', date).eq('class_id', cls.id).is('student_id', null);
 
   const displayed = eligible.filter(s => hasRoster ? (rosterIds.has(s.id) || checkedIds.has(s.id)) : checkedIds.has(s.id));
   const notDisplayed = eligible.filter(s => !displayed.includes(s));
@@ -261,9 +265,15 @@ async function buildClassCard(cls, date, showSchoolName){
     return sc ? sc.name : '';
   }
 
+  const visitorOptions = (current)=>`
+    <option value="" ${!current?'selected':''}>通常</option>
+    <option value="member_visitor" ${current==='member_visitor'?'selected':''}>会員ビジター ¥1650</option>
+    <option value="non_member_visitor" ${current==='non_member_visitor'?'selected':''}>非会員ビジター ¥2200</option>`;
+
   function studentRow(st){
     const monthCount = (monthAttendance||[]).filter(a=>a.student_id===st.id).length;
     const status = statusMap[st.id]; // undefined | 'present' | 'absent'
+    const visitorType = visitorMap[st.id] || '';
     const limit = PLAN_LIMIT[st.plan];
     const overLimit = limit && monthCount >= limit && status !== 'present';
     let presentClass = 'checkin-btn';
@@ -276,11 +286,23 @@ async function buildClassCard(cls, date, showSchoolName){
         <div>
           <div class="sname">${st.name}<span class="badge ${st.plan}">${st.plan}</span></div>
           <div class="smeta">${st.member_no} ・ 今月 ${monthCount}${limit ? '/'+limit : ''}回</div>
+          ${status==='present' ? `<select class="small" style="margin-top:4px;" onchange="setVisitorType('${st.id}','${cls.id}','${date}',this.value)">${visitorOptions(visitorType)}</select>` : ''}
         </div>
         <div class="flex-row">
           <button class="${presentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','present')">出席</button>
           <button class="${absentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','absent')">欠席</button>
         </div>
+      </div>`;
+  }
+
+  function guestRow(g){
+    return `
+      <div class="student-row">
+        <div>
+          <div class="sname">${g.guest_name}<span class="badge" style="background:var(--card2);color:var(--warn);">ゲスト</span></div>
+          <select class="small" style="margin-top:4px;" onchange="setGuestVisitorType('${g.id}',this.value)">${visitorOptions(g.visitor_type)}</select>
+        </div>
+        <button class="danger" onclick="removeGuest('${g.id}')">削除</button>
       </div>`;
   }
 
@@ -320,8 +342,18 @@ async function buildClassCard(cls, date, showSchoolName){
     <div class="class-sub">${DOW[dow]}曜日${hasRoster ? '・登録メンバー '+rosterIds.size+'名' : '・登録メンバー未設定(出席済みのみ表示)'}</div>
     <button class="link-btn" onclick="toggleWalkinPanel('${weekTableId}')">今月の出席表(週別)</button>
     <div id="${weekTableId}" style="display:none;margin:8px 0;">${weekTableHtml}</div>
-    ${displayed.length ? displayed.map(studentRow).join('') : '<div class="empty">まだ誰も出席登録されていません</div>'}
+    ${displayed.length ? displayed.map(studentRow).join('') : ''}
+    ${(todayGuests||[]).map(guestRow).join('')}
+    ${!displayed.length && !(todayGuests||[]).length ? '<div class="empty">まだ誰も出席登録されていません</div>' : ''}
     <div class="walkin-panel">
+      <div class="flex-row" style="margin-bottom:8px;">
+        <input type="text" id="guestName_${cls.id}" placeholder="名簿に無い人の名前">
+        <select id="guestType_${cls.id}" style="max-width:140px;">
+          <option value="non_member_visitor">非会員 ¥2200</option>
+          <option value="member_visitor">会員ビジター ¥1650</option>
+        </select>
+        <button class="ghost small" onclick="addGuest('${cls.id}','${date}')">追加</button>
+      </div>
       <button class="link-btn" onclick="toggleWalkinPanel('${walkInId}')">＋ 名簿から追加</button>
       <div id="${walkInId}" style="display:none;margin-top:8px;">
         <input type="text" placeholder="名前で検索" oninput="filterWalkin('${walkInId}',this.value)" style="margin-bottom:8px;">
@@ -388,6 +420,37 @@ async function setAttendanceStatus(studentId, classId, date, status){
 }
 window.setAttendanceStatus = setAttendanceStatus;
 
+async function setVisitorType(studentId, classId, date, visitorType){
+  await sb.from('attendance').update({ visitor_type: visitorType || null })
+    .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date);
+}
+window.setVisitorType = setVisitorType;
+
+async function addGuest(classId, date){
+  const nameInput = document.getElementById('guestName_'+classId);
+  const typeSelect = document.getElementById('guestType_'+classId);
+  const name = nameInput.value.trim();
+  if(!name){ alert('名前を入力してください'); return; }
+  const { error } = await sb.from('attendance').insert({
+    class_id: classId, attended_on: date, status: 'present',
+    guest_name: name, visitor_type: typeSelect.value
+  });
+  if(error){ alert('登録エラー: '+error.message); return; }
+  render();
+}
+window.addGuest = addGuest;
+
+async function setGuestVisitorType(attendanceId, visitorType){
+  await sb.from('attendance').update({ visitor_type: visitorType || null }).eq('id', attendanceId);
+}
+window.setGuestVisitorType = setGuestVisitorType;
+
+async function removeGuest(attendanceId){
+  await sb.from('attendance').delete().eq('id', attendanceId);
+  render();
+}
+window.removeGuest = removeGuest;
+
 /* ---------------- 出席(校舎モード) ---------------- */
 async function renderAttend(main){
   main.innerHTML = `
@@ -431,15 +494,81 @@ async function loadAttendBody(){
 async function renderInstructorPage(main){
   const sel = document.getElementById('instructorSelect');
   currentInstructor = sel ? sel.value : currentInstructor;
+  const ym = todayStr().slice(0,7);
   main.innerHTML = `
     <div class="toolbar">
       <input type="date" id="instrDate" value="${todayStr()}">
+    </div>
+    <div class="card">
+      <div class="row">
+        <div style="font-weight:700;">給与計算用CSV出力</div>
+      </div>
+      <div class="toolbar" style="margin-top:8px;">
+        <input type="month" id="csvMonth" value="${ym}">
+        <button class="primary" onclick="exportInstructorCsv()">CSVダウンロード</button>
+      </div>
+      <div class="muted small">選んだ月の${currentInstructor||''}先生の全クラス、出席者数・ビジター料金をまとめて出力します</div>
     </div>
     <div id="instrBody" class="empty">読み込み中...</div>
   `;
   document.getElementById('instrDate').onchange = loadInstructorBody;
   await loadInstructorBody();
 }
+
+async function exportInstructorCsv(){
+  if(!currentInstructor){ alert('先生を選択してください'); return; }
+  const ym = document.getElementById('csvMonth').value;
+  const start = ym + '-01';
+  const end = ym + '-31';
+
+  const { data: classes } = await sb.from('classes').select('*, schools(name)')
+    .eq('instructor', currentInstructor);
+  if(!classes || !classes.length){ alert('この先生のクラスがありません'); return; }
+  const classIds = classes.map(c=>c.id);
+  const classMap = {}; classes.forEach(c=>{ classMap[c.id] = c; });
+
+  const { data: rows } = await sb.from('attendance').select('*, students(name, member_no)')
+    .in('class_id', classIds).gte('attended_on', start).lte('attended_on', end).order('attended_on');
+
+  const VISITOR_FEE = { member_visitor: 1650, non_member_visitor: 2200 };
+
+  let csv = '日付,校舎,クラス,生徒名,会員番号,状態,区分,金額\n';
+  let totalPresent = 0, totalRevenue = 0;
+  const perClassCount = {};
+
+  (rows||[]).forEach(r=>{
+    const cls = classMap[r.class_id];
+    const schoolName = cls && cls.schools ? cls.schools.name : '';
+    const className = cls ? cls.name : '';
+    const name = r.students ? r.students.name : (r.guest_name || '');
+    const memberNo = r.students ? r.students.member_no : 'ゲスト';
+    const statusLabel = r.status === 'present' ? '出席' : '欠席';
+    const kubun = r.visitor_type === 'member_visitor' ? '会員ビジター' : r.visitor_type === 'non_member_visitor' ? '非会員ビジター' : '通常';
+    const fee = VISITOR_FEE[r.visitor_type] || 0;
+    if(r.status === 'present'){
+      totalPresent++;
+      totalRevenue += fee;
+      perClassCount[className] = (perClassCount[className]||0) + 1;
+    }
+    csv += [r.attended_on, schoolName, className, name, memberNo, statusLabel, kubun, fee].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',') + '\n';
+  });
+
+  csv += '\n集計\n';
+  csv += `出席合計人数,${totalPresent}\n`;
+  csv += `ビジター料金合計,${totalRevenue}\n`;
+  Object.keys(perClassCount).forEach(cn=>{
+    csv += `${cn} 出席人数,${perClassCount[cn]}\n`;
+  });
+
+  const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${currentInstructor}_${ym}_出席集計.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+window.exportInstructorCsv = exportInstructorCsv;
 
 async function loadInstructorBody(){
   const refDate = document.getElementById('instrDate').value;
