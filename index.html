@@ -285,12 +285,12 @@ async function buildClassCard(cls, date, showSchoolName){
       <div class="student-row">
         <div>
           <div class="sname">${st.name}<span class="badge ${st.plan}">${st.plan}</span></div>
-          <div class="smeta">${st.member_no} ・ 今月 ${monthCount}${limit ? '/'+limit : ''}回</div>
-          ${status==='present' ? `<select class="small" style="margin-top:4px;" onchange="setVisitorType('${st.id}','${cls.id}','${date}',this.value)">${visitorOptions(visitorType)}</select>` : ''}
+          <div class="smeta">${st.member_no} ・ 今月 <span class="count-num">${monthCount}</span>${limit ? '/'+limit : ''}回</div>
+          <select class="small visitor-select" style="margin-top:4px;display:${status==='present'?'':'none'};" onchange="setVisitorType('${st.id}','${cls.id}','${date}',this.value)">${visitorOptions(visitorType)}</select>
         </div>
         <div class="flex-row">
-          <button class="${presentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','present')">出席</button>
-          <button class="${absentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','absent')">欠席</button>
+          <button class="${presentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','present',this)">出席</button>
+          <button class="${absentClass}" onclick="setAttendanceStatus('${st.id}','${cls.id}','${date}','absent',this)">欠席</button>
         </div>
       </div>`;
   }
@@ -403,20 +403,42 @@ function toggleWalkinPanel(id){
 }
 window.toggleWalkinPanel = toggleWalkinPanel;
 
-async function setAttendanceStatus(studentId, classId, date, status){
-  const { data: existing } = await sb.from('attendance').select('id,status')
-    .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date).maybeSingle();
-  if(existing && existing.status === status){
-    // 同じボタンをもう一度押したら記録を消す(未定に戻す)
-    await sb.from('attendance').delete().eq('id', existing.id);
-  } else if(existing){
-    const { error } = await sb.from('attendance').update({ status }).eq('id', existing.id);
-    if(error){ alert('更新エラー: '+error.message); return; }
-  } else {
-    const { error } = await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date, status });
-    if(error){ alert('登録エラー: '+error.message); return; }
+async function setAttendanceStatus(studentId, classId, date, status, btnEl){
+  const row = btnEl.closest('.student-row');
+  const [presentBtn, absentBtn] = row.querySelectorAll('.flex-row button');
+  const wasPresent = presentBtn.classList.contains('done');
+  const wasAbsent = absentBtn.classList.contains('done-absent');
+  const currentStatus = wasPresent ? 'present' : wasAbsent ? 'absent' : null;
+  const newStatus = currentStatus === status ? null : status;
+
+  // 先に画面だけ即座に切り替える(通信を待たない)
+  presentBtn.classList.toggle('done', newStatus === 'present');
+  presentBtn.classList.remove('limit');
+  absentBtn.classList.toggle('done-absent', newStatus === 'absent');
+  const visitorSelect = row.querySelector('.visitor-select');
+  if(visitorSelect) visitorSelect.style.display = newStatus === 'present' ? '' : 'none';
+  const countEl = row.querySelector('.count-num');
+  if(countEl){
+    let n = parseInt(countEl.textContent, 10) || 0;
+    if(currentStatus === 'present' && newStatus !== 'present') n -= 1;
+    if(currentStatus !== 'present' && newStatus === 'present') n += 1;
+    countEl.textContent = Math.max(0, n);
   }
-  render();
+
+  // 裏でDBに保存
+  try{
+    const { data: existing } = await sb.from('attendance').select('id')
+      .eq('student_id', studentId).eq('class_id', classId).eq('attended_on', date).maybeSingle();
+    if(newStatus === null){
+      if(existing) await sb.from('attendance').delete().eq('id', existing.id);
+    } else if(existing){
+      await sb.from('attendance').update({ status: newStatus }).eq('id', existing.id);
+    } else {
+      await sb.from('attendance').insert({ student_id: studentId, class_id: classId, attended_on: date, status: newStatus });
+    }
+  } catch(e){
+    alert('保存エラー: '+e.message);
+  }
 }
 window.setAttendanceStatus = setAttendanceStatus;
 
