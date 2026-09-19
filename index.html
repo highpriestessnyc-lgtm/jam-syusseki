@@ -477,7 +477,10 @@ window.removeGuest = removeGuest;
 async function renderAttend(main){
   main.innerHTML = `
     <div class="toolbar">
+      <button class="ghost" onclick="shiftAttendDate(-1)">◀前日</button>
       <input type="date" id="attendDate" value="${todayStr()}">
+      <button class="ghost" onclick="shiftAttendDate(0)">今日</button>
+      <button class="ghost" onclick="shiftAttendDate(1)">翌日▶</button>
     </div>
     <div id="attendBody" class="empty">読み込み中...</div>
   `;
@@ -485,31 +488,34 @@ async function renderAttend(main){
   await loadAttendBody();
 }
 
+function shiftAttendDate(deltaDays){
+  const input = document.getElementById('attendDate');
+  if(deltaDays === 0){
+    input.value = todayStr();
+  } else {
+    const d = new Date(input.value+'T00:00:00');
+    d.setDate(d.getDate()+deltaDays);
+    input.value = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  loadAttendBody();
+}
+window.shiftAttendDate = shiftAttendDate;
+
 async function loadAttendBody(){
-  const refDate = document.getElementById('attendDate').value;
-  const weekDates = getWeekDates(refDate);
+  const date = document.getElementById('attendDate').value;
+  const dow = new Date(date+'T00:00:00').getDay();
   const body = document.getElementById('attendBody');
   body.innerHTML = '読み込み中...';
 
   const { data: classes } = await sb.from('classes').select('*')
-    .eq('school_id', currentSchoolId).order('day_of_week').order('sort_order');
+    .eq('school_id', currentSchoolId).eq('day_of_week', dow).order('sort_order');
 
   if(!classes || !classes.length){
-    body.innerHTML = `<div class="empty">クラスがありません(クラス管理タブで追加できます)</div>`;
+    body.innerHTML = `<div class="empty">${DOW[dow]}曜日のクラスはありません(クラス管理タブで追加できます)</div>`;
     return;
   }
-
-  let html = '';
-  for(let dow=0; dow<7; dow++){
-    const dayClasses = classes.filter(c => c.day_of_week === dow);
-    if(!dayClasses.length) continue;
-    const dDate = weekDates[dow];
-    const isToday = dDate === todayStr();
-    html += `<div class="day-section-title">${DOW[dow]}曜日 <span class="muted">(${dDate.slice(5)}${isToday?'・本日':''})</span></div>`;
-    const cards = await Promise.all(dayClasses.map(c => buildClassCard(c, dDate, false)));
-    html += cards.join('');
-  }
-  body.innerHTML = html || '<div class="empty">この週はクラスがありません</div>';
+  const cards = await Promise.all(classes.map(c => buildClassCard(c, date, false)));
+  body.innerHTML = cards.join('');
 }
 
 /* ---------------- 先生ごとページ ---------------- */
@@ -519,7 +525,10 @@ async function renderInstructorPage(main){
   const ym = todayStr().slice(0,7);
   main.innerHTML = `
     <div class="toolbar">
+      <button class="ghost" onclick="shiftInstrDate(-1)">◀前日</button>
       <input type="date" id="instrDate" value="${todayStr()}">
+      <button class="ghost" onclick="shiftInstrDate(0)">今日</button>
+      <button class="ghost" onclick="shiftInstrDate(1)">翌日▶</button>
     </div>
     <div class="card">
       <div class="row">
@@ -592,31 +601,35 @@ async function exportInstructorCsv(){
 }
 window.exportInstructorCsv = exportInstructorCsv;
 
+function shiftInstrDate(deltaDays){
+  const input = document.getElementById('instrDate');
+  if(deltaDays === 0){
+    input.value = todayStr();
+  } else {
+    const d = new Date(input.value+'T00:00:00');
+    d.setDate(d.getDate()+deltaDays);
+    input.value = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  loadInstructorBody();
+}
+window.shiftInstrDate = shiftInstrDate;
+
 async function loadInstructorBody(){
-  const refDate = document.getElementById('instrDate').value;
-  const weekDates = getWeekDates(refDate);
+  const date = document.getElementById('instrDate').value;
+  const dow = new Date(date+'T00:00:00').getDay();
   const body = document.getElementById('instrBody');
   body.innerHTML = '読み込み中...';
   if(!currentInstructor){ body.innerHTML = '<div class="empty">インストラクターがまだ登録されていません</div>'; return; }
 
   const { data: classes } = await sb.from('classes').select('*')
-    .eq('instructor', currentInstructor).order('day_of_week').order('sort_order');
+    .eq('instructor', currentInstructor).eq('day_of_week', dow).order('sort_order');
 
   if(!classes || !classes.length){
-    body.innerHTML = `<div class="empty">${currentInstructor}先生のクラスは登録されていません</div>`;
+    body.innerHTML = `<div class="empty">${currentInstructor}先生の${DOW[dow]}曜日のクラスはありません</div>`;
     return;
   }
-  let html = '';
-  for(let dow=0; dow<7; dow++){
-    const dayClasses = classes.filter(c => c.day_of_week === dow);
-    if(!dayClasses.length) continue;
-    const dDate = weekDates[dow];
-    const isToday = dDate === todayStr();
-    html += `<div class="day-section-title">${DOW[dow]}曜日 <span class="muted">(${dDate.slice(5)}${isToday?'・本日':''})</span></div>`;
-    const cards = await Promise.all(dayClasses.map(c => buildClassCard(c, dDate, true)));
-    html += cards.join('');
-  }
-  body.innerHTML = html;
+  const cards = await Promise.all(classes.map(c => buildClassCard(c, date, true)));
+  body.innerHTML = cards.join('');
 }
 
 /* ---------------- 名簿 ---------------- */
