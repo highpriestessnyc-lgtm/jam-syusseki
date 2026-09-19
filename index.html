@@ -200,6 +200,13 @@ function todayStr(){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 
+// 'YYYY-MM' を受け取ってその月の最終日('YYYY-MM-DD')を返す(31日固定バグの修正用)
+function monthEndStr(ym){
+  const [y, m] = ym.split('-').map(Number);
+  const last = new Date(y, m, 0);
+  return ym + '-' + String(last.getDate()).padStart(2,'0');
+}
+
 // 基準日を含む週(日曜始まり)の7日分の日付文字列を、曜日インデックス順で返す
 function getWeekDates(refDateStr){
   const ref = new Date(refDateStr+'T00:00:00');
@@ -244,7 +251,7 @@ async function buildClassCard(cls, date, showSchoolName){
   const { data: monthAttendance } = await sb.from('attendance').select('student_id,attended_on,status')
     .in('student_id', eligibleIds.length?eligibleIds:['00000000-0000-0000-0000-000000000000'])
     .eq('status','present')
-    .gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
+    .gte('attended_on', monthStart).lte('attended_on', monthEndStr(date.slice(0,7)));
   const { data: todayAttendance } = await sb.from('attendance').select('student_id,class_id,status,visitor_type')
     .eq('attended_on', date).eq('class_id', cls.id);
   const statusMap = {}; // studentId -> 'present'|'absent'
@@ -311,7 +318,7 @@ async function buildClassCard(cls, date, showSchoolName){
 
   // 今月のこのクラスの出席から「第n週」テーブルを作る
   const { data: classMonthAttendance } = await sb.from('attendance').select('student_id, attended_on, status')
-    .eq('class_id', cls.id).gte('attended_on', monthStart).lte('attended_on', date.slice(0,7)+'-31');
+    .eq('class_id', cls.id).gte('attended_on', monthStart).lte('attended_on', monthEndStr(date.slice(0,7)));
   const weekMap = {}; // studentId -> Map(weekNo -> status)
   let maxWeek = 4;
   (classMonthAttendance||[]).forEach(a=>{
@@ -550,7 +557,7 @@ async function exportInstructorCsv(){
   if(!currentInstructor){ alert('先生を選択してください'); return; }
   const ym = document.getElementById('csvMonth').value;
   const start = ym + '-01';
-  const end = ym + '-31';
+  const end = monthEndStr(ym);
 
   const { data: classes } = await sb.from('classes').select('*, schools(name)')
     .eq('instructor', currentInstructor);
@@ -874,7 +881,7 @@ async function renderReport(main){
 async function loadReport(){
   const ym = document.getElementById('reportMonth').value;
   const start = ym+'-01';
-  const end = ym+'-31';
+  const end = monthEndStr(ym);
   const body = document.getElementById('reportBody');
   body.innerHTML = '読み込み中...';
 
